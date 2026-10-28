@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mon coach IA — Mood Golf</title>
+<style>
+:root{--bg:#f4f6f2;--w:#fff;--tx:#0b1a0f;--t3:#55655a;--g:#0a7a3d;--gl:#e3f3e8;--bd:#d3dcd5;--r:#c0392b;--o:#b9770e;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#0c110d;--w:#151c16;--tx:#f2f7f3;--t3:#9fb0a4;--g:#3ddc84;--gl:#173222;--bd:#26332a;--r:#ff7a6b;--o:#f0b44c}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#app{display:flex;flex-direction:column;height:100%;padding-top:env(safe-area-inset-top,0)}
+#m{flex:1;overflow-y:auto;padding:14px}
+#tb{display:flex;background:var(--w);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0)}
+#tb button{flex:1;padding:13px 2px;border:0;background:none;color:var(--t3);font-size:12px;font-weight:700}
+#tb button.on{color:var(--g);box-shadow:inset 0 3px 0 var(--g)}
+h1{font-size:24px;font-weight:800;margin-bottom:10px}h2{font-size:16px;margin:4px 0 6px}
+.c{background:var(--w);border:1px solid var(--bd);border-radius:16px;padding:14px;margin-bottom:12px}
+.l{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:5px}
+.t{color:var(--t3);font-size:13px;line-height:1.5}
+.btn{width:100%;padding:15px;border:0;border-radius:14px;background:var(--g);color:#fff;font-size:16px;font-weight:800;margin-bottom:10px}
+@media(prefers-color-scheme:dark){.btn{color:#04120a}}
+.gh{background:none;border:1px solid var(--bd);color:var(--tx)}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.chip{padding:9px 14px;border-radius:99px;border:1px solid var(--bd);background:var(--w);color:var(--tx);font-weight:700;font-size:13px;margin:0 6px 6px 0}
+.chip.on{background:var(--g);border-color:var(--g);color:#fff}
+input,select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);font-size:16px}
+.cf{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:800;background:var(--gl);color:var(--g)}
+.cf.m{color:var(--o)}.cf.f{color:var(--r)}
+.vw{position:relative;background:#000;border-radius:16px;overflow:hidden;margin-bottom:10px}
+.vw video{width:100%;display:block;max-height:60vh}
+.ov{position:absolute;inset:0;pointer-events:none}
+#cd{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:110px;font-weight:900;color:#fff;text-shadow:0 2px 12px #000}
+.bar{height:8px;background:var(--bd);border-radius:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--g)}
+details{border-top:1px solid var(--bd);padding:8px 0}summary{font-weight:700;font-size:14px}
+ol{padding-left:18px;font-size:13px;line-height:1.5}
+</style></head><body><div id="app"><div id="m"></div>
+<div id="tb"><button data-s="home">Coach</button><button data-s="film">Filmer</button><button data-s="rep">Rapport</button><button data-s="hist">Historique</button><button data-s="plan">Plan</button></div></div>
+<script type="module">
+import {PoseLandmarker,FilesetResolver} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+var K="mg_coach_v1",$=function(i){return document.getElementById(i)};
+var S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
+S=S||{prof:{hcp:20,freq:3,min:30,lefty:false},hist:[],plan:[]};
+function sv(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}
+var U={step:"home",view:"face",blob:null,url:null,busy:null,cur:null,stream:null,rec:null,err:null,consent:false,cmp:[]};
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+function lvl(){var h=+S.prof.hcp;return h>=25?0:h>=12?1:2}
+
+/* ───── Contenu coaching ───── */
+var D={
+sway:{n:"Déplacement latéral du bassin (sway)",ex:["e1","e12"],cons:"Contacts irréguliers (gras ou maigre) et perte de puissance.",now:"Ton bassin glisse sur le côté pendant la montée.",chg:"Garde le bassin au-dessus des pieds et tourne autour de ta jambe arrière.",feel:"Sentir la fesse arrière « charger » sans sortir de la jambe.",chk:"Refilme de face : le bassin doit moins bouger entre l’adresse et le haut."},
+head:{n:"Tête mobile pendant le swing",ex:["e3","e1"],cons:"Le point bas du swing varie : contacts irréguliers.",now:"Ta tête se déplace nettement entre l’adresse et l’impact.",chg:"Garde le regard sur un point précis de la balle.",feel:"Une tête « calme » alors que le corps tourne.",chk:"Compare le déplacement de la tête sur la prochaine vidéo."},
+ext:{n:"Redressement du buste / des jambes vers l’impact (early extension)",ex:["e5","e6"],cons:"Manque d’espace pour les bras : toe-shots, slices ou trajectoires tirées.",now:"Tes hanches et ton buste se redressent en descendant.",chg:"Conserve l’inclinaison du buste et la flexion des genoux jusqu’à l’impact.",feel:"Les fesses restent « collées au mur » derrière toi.",chk:"Refilme de profil : l’angle du buste varie moins."},
+arm:{n:"Bras avant plié au sommet",ex:["e7","e8"],cons:"Arc plus court, moins de puissance et de régularité.",now:"Ton bras avant se plie nettement en haut de la montée.",chg:"Garde le bras avant long mais souple, et laisse le corps faire tourner les bras.",feel:"Un arc large, comme une grande « porte » qui s’ouvre.",chk:"Regarde l’angle du coude avant sur la prochaine vidéo."},
+rot:{n:"Rotation d’épaules limitée",ex:["e9","e10"],cons:"Les bras compensent : perte de puissance et de régularité.",now:"Tes épaules tournent peu par rapport à l’adresse.",chg:"Tourne le dos vers la cible en gardant le bassin plus stable.",feel:"Le dos qui « regarde » la cible en haut.",chk:"En vue de face, tes épaules paraissent plus étroites au sommet."},
+bal:{n:"Finition instable",ex:["e11","e12"],cons:"Signe d’un transfert de poids ou d’un rythme déséquilibré.",now:"Ton bassin bouge encore à la fin du swing.",chg:"Termine sur la jambe avant, dos tourné vers la cible, et tiens la pose.",feel:"Statue de 3 secondes.",chk:"La position finale reste immobile sur la prochaine vidéo."},
+tempo:{n:"Tempo irrégulier",ex:["e13","e14"],cons:"Rythme précipité ou trop lent : timing du contact moins constant.",now:"Le rapport montée/descente mesuré s’éloigne de l’intervalle courant.",chg:"Montée environ deux à trois fois plus longue que la descente.",feel:"Compter « un-deux-trois » en montée, « quatre » à l’impact.",chk:"Le rapport se rapproche de 3 pour 1 sur plusieurs vidéos."},
+post:{n:"Buste trop droit à l’adresse",ex:["e5","e15"],cons:"Difficulté à rester dans la posture pendant le swing.",now:"Ton buste est presque vertical à l’adresse.",chg:"Bascule depuis les hanches, dos droit, genoux légèrement fléchis.",feel:"Le poids au milieu du pied, fesses vers l’arrière.",chk:"Vue de profil : le buste est plus incliné."}};
+var X={
+e1:["Swing contre un mur","Garder le bassin stable","1. Place-toi dos à un mur, fesse arrière proche. 2. Monte lentement sans pousser le mur avec la hanche. 3. Redescends.",10,3,"45 s","Mur ou bâton planté","Rotation sans glisser","Pousser la hanche contre le mur"],
+e3:["Point de fixation","Stabiliser la tête","1. Colle un petit autocollant sur la balle. 2. Fixe-le pendant toute la montée. 3. Termine ton swing sans lever la tête.",10,3,"45 s","Balle + autocollant","Tête calme","Suivre la balle des yeux trop tôt"],
+e5:["Fesses au mur","Conserver l’inclinaison du buste","1. Dos à un mur, fesses effleurant le mur. 2. Fléchis légèrement les genoux. 3. Swing lent sans perdre le contact.",8,3,"60 s","Mur","Fesses collées","Se redresser en fin de descente"],
+e6:["Genoux fléchis tenus","Garder la flexion des genoux","1. Prends ta posture. 2. Fais 5 demi-swings en gardant l’angle des genoux. 3. Pause à l’impact.",5,4,"45 s","Club","Hauteur constante","Se relever à l’impact"],
+e7:["Serviette sous les bras","Garder bras et corps connectés","1. Coince une serviette sous chaque aisselle. 2. Fais des swings courts sans la lâcher.",10,3,"45 s","Serviette","Bras liés au buste","Serrer trop fort"],
+e8:["Swing 9h–3h","Coordination bras-corps","1. Montée jusqu’à l’horizontale. 2. Descente jusqu’à l’horizontale. 3. Garde le bras avant long.",10,3,"45 s","Club","Bras longs et souples","Plier le coude pour monter plus haut"],
+e9:["Rotation club sur les épaules","Tourner les épaules","1. Club sur les épaules, posture de golf. 2. Tourne pour pointer l’épaule avant sous le menton. 3. Reviens.",10,3,"30 s","Club","Dos vers la cible","Faire tourner les hanches autant"],
+e10:["Mobilité thoracique « livre ouvert »","Libérer la rotation","1. Allongé sur le côté, genoux pliés. 2. Ouvre le bras du dessus vers l’arrière. 3. Regarde la main.",8,2,"30 s","Aucun","Étirement du haut du dos","Laisser les genoux bouger"],
+e11:["Finish tenu 3 secondes","Finir en équilibre","1. Swing à 70 %. 2. Tiens la finition 3 s.",10,3,"30 s","Club","Statue stable","Reculer après le swing"],
+e12:["Swing pieds joints","Équilibre et tempo","1. Pieds joints. 2. Swing à 50 %. 3. Reste équilibré.",10,3,"30 s","Club","Équilibre central","Swinguer trop fort"],
+e13:["Métronome 3:1","Régler le rythme","1. Règle un métronome à 60 bpm. 2. Montée sur 3 temps. 3. Descente sur 1 temps.",10,3,"45 s","Métronome","Montée posée","Précipiter la montée"],
+e14:["Swing au ralenti","Séquencer le mouvement","1. Fais le swing à 30 % de vitesse. 2. Vérifie chaque position. 3. Accélère un peu à chaque série.",8,3,"45 s","Club","Mouvement fluide","Saccader les positions"],
+e15:["Posture au miroir","Postuer l’adresse","1. Place-toi de profil devant un miroir. 2. Bascule des hanches, dos droit. 3. Mémorise.",5,2,"30 s","Miroir","Poids au milieu du pied","Courber le dos"]};
+
+/* ───── Analyse pose ───── */
+var PL=null;
+async function loadModel(){
+  if(PL)return PL;
+  var f=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  PL=await PoseLandmarker.createFromOptions(f,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",delegate:"CPU"},runningMode:"VIDEO",numPoses:1});
+  return PL;
+}
+function seek(v,t){
+  return new Promise(function(res){
+    var done=false,f=function(){if(!done){done=true;v.removeEventListener("seeked",f);res()}};
+    v.addEventListener("seeked",f);setTimeout(f,1500);
+    v.currentTime=Math.abs(v.currentTime-t)<0.001?t+0.001:t;
+  });
+}
+function ready(v){return new Promise(function(r){var n=0,i=setInterval(function(){if(v.readyState>=2||++n>20){clearInterval(i);r()}},25)})}
+function sample(url,cb){
+  return new Promise(function(res,rej){
+    var v=document.createElement("video");
+    v.muted=true;v.playsInline=true;v.setAttribute("playsinline","");v.preload="auto";
+    v.style.cssText="position:fixed;left:0;top:0;width:160px;height:90px;opacity:.01;pointer-events:none";
+    document.body.appendChild(v);
+    var end=function(){try{v.remove()}catch(e){}};
+    var to=setTimeout(function(){end();rej(new Error("Lecture de la vidéo impossible (délai dépassé). Essaie une vidéo MP4 plus courte."))},20000);
+    v.onerror=function(){clearTimeout(to);end();rej(new Error("Format vidéo non lisible par ce navigateur."))};
+    v.onloadedmetadata=async function(){
+      clearTimeout(to);
+      try{
+        if(!isFinite(v.duration))await seek(v,1e6);
+        var d=v.duration;
+        if(!isFinite(d)||d<1.5)throw new Error("Vidéo trop courte (moins de 1,5 s) ou durée illisible.");
+        var pl=await Promise.race([loadModel(),new Promise(function(_,r){setTimeout(function(){r(new Error("Modèle d’analyse non téléchargé (réseau bloqué ou trop lent)."))},60000)})]);
+        var step=Math.max(1/15,d/240),out=[],ts=0;
+        for(var t=0;t<d;t+=step){
+          await seek(v,t);await ready(v);
+          ts+=Math.round(step*1000);
+          var r=pl.detectForVideo(v,ts);
+          out.push({t:t,lm:r.landmarks&&r.landmarks[0]||null});
+          cb(t/d);
+        }
+        end();res({fr:out,d:d});
+      }catch(e){end();rej(e)}
+    };
+    v.src=url;v.load();
+  });
+}
+function ang(a,b,c){var x=Math.atan2(a.y-b.y,a.x-b.x)-Math.atan2(c.y-b.y,c.x-b.x);x=Math.abs(x*180/Math.PI);return x>180?360-x:x}
+function mid(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2}}
+function analyze(smp,view){
+  var L=S.prof.lefty,sh=L?12:11,el=L?14:13,wr=L?16:15;
+  var ok=function(f){var q=f.lm;return q&&[11,12,23,24,15,16].every(function(i){return (q[i].visibility||0)>.5})};
+  var F=smp.fr.filter(function(f){return ok(f)}),rate=F.length/smp.fr.length;
+  if(rate<.6||F.length<12)return {fail:"Le corps n’est pas assez visible sur la vidéo (détecté sur "+Math.round(rate*100)+" % des images). Recule, cadre tout le corps et le club, avec un fond dégagé."};
+  var wy=F.map(function(f){return (f.lm[15].y+f.lm[16].y)/2});
+  var a0=wy.slice(0,5).sort()[2],top=0;wy.forEach(function(y,i){if(y<wy[top])top=i});
+  var rg=a0-wy[top];if(rg<.08)return {fail:"Aucun swing net détecté (mouvement des mains trop faible). Filme un swing complet."};
+  var st=0;for(var i=0;i<wy.length;i++)if(wy[i]<a0-.1*rg){st=Math.max(0,i-1);break}
+  var im=wy.length-1;for(i=top+1;i<wy.length;i++)if(wy[i]>a0-.15*rg){im=i;break}
+  if(im<=top||top<=st)return {fail:"Les phases du swing n’ont pas pu être identifiées de façon fiable. Refilme un swing complet."};
+  var q=function(i,k){return F[i].lm[k]},hip=function(i){return mid(q(i,23),q(i,24))},shc=function(i){return mid(q(i,11),q(i,12))};
+  var torso=Math.hypot(shc(0).x-hip(0).x,shc(0).y-hip(0).y);if(torso<.05)return {fail:"Le joueur est trop loin ou trop petit dans le cadre."};
+  var vis=F.reduce(function(s,f){return s+[11,12,23,24,15,16].reduce(function(z,k){return z+f.lm[k].visibility},0)/6},0)/F.length;
+  var conf=rate>=.9&&vis>.8?"élevée":rate>=.75&&vis>.65?"moyenne":"faible";
+  var M={},def=[],ok2=[],pf=function(id,sev,mom,obs,hyp){def.push({id:id,sev:sev,mom:mom,obs:obs,hyp:hyp})};
+  var tempo=(F[top].t-F[st].t)/(F[im].t-F[top].t);M.tempo=Math.round(tempo*10)/10;
+  tempo<2||tempo>4?pf("tempo",Math.min(1,Math.abs(tempo-3)/3),"Du début de la montée à l’impact","Rapport montée/descente mesuré : "+M.tempo+" pour 1.","Intervalle courant indicatif : environ 2 à 4 pour 1 ; la détection de l’impact est une estimation."):ok2.push("Tempo régulier ("+M.tempo+" pour 1)");
+  var ae=ang(q(top,sh),q(top,el),q(top,wr));M.coudeHaut=Math.round(ae);
+  ae<125?pf("arm",Math.min(1,(125-ae)/50),"Haut de la montée","Angle du coude avant : environ "+M.coudeHaut+"°.","Un bras plié peut aussi venir d’une prise de vue légèrement oblique."):ok2.push("Bras avant bien étendu au sommet");
+  var fin=F.slice(Math.floor(F.length*.85)).map(function(f){return hip(F.indexOf(f)).x}),mean=fin.reduce(function(a,b){return a+b},0)/fin.length;
+  var sd=Math.sqrt(fin.reduce(function(a,b){return a+(b-mean)*(b-mean)},0)/fin.length)/torso;M.finStab=Math.round(sd*100)/100;
+  sd>.06?pf("bal",Math.min(1,sd/.15),"Finition","Le bassin bouge encore en fin de swing (variation "+M.finStab+" × buste).","Indicatif : peut aussi venir du cadrage ou d’un recul du joueur."):ok2.push("Finition stable");
+  if(view==="face"){
+    var xs=F.slice(0,im+1).map(function(f){return f.lm[0].x}),hm=(Math.max.apply(0,xs)-Math.min.apply(0,xs))/torso;M.tete=Math.round(hm*100)/100;
+    hm>.35?pf("head",Math.min(1,hm/.7),"Entre l’adresse et l’impact","Déplacement latéral de la tête : "+M.tete+" × la longueur du buste.","La rotation du buste fait aussi bouger la tête en 2D : seuil indicatif."):ok2.push("Tête stable");
+    var hs=Math.abs(hip(top).x-hip(0).x)/torso;M.sway=Math.round(hs*100)/100;
+    hs>.3?pf("sway",Math.min(1,hs/.6),"Sommet de la montée","Le bassin se déplace latéralement de "+M.sway+" × la longueur du buste.","Seuil indicatif ; un léger déplacement est normal."):ok2.push("Bassin stable à la montée");
+    var w0=Math.abs(q(0,11).x-q(0,12).x),w1=Math.abs(q(top,11).x-q(top,12).x),rr=w0>0?w1/w0:1;M.rot=Math.round(rr*100)/100;
+    rr>.8?pf("rot",Math.min(1,rr-.6),"Sommet de la montée","Largeur apparente des épaules au sommet : "+M.rot+" × celle de l’adresse.","Estimation 2D de la rotation, pas une mesure d’angle."):ok2.push("Bonne rotation d’épaules apparente");
+  }else{
+    var tg=function(i){var h=hip(i),s=shc(i);return Math.abs(Math.atan2(s.x-h.x,h.y-s.y)*180/Math.PI)};
+    var ta=tg(0),ti=tg(im),dd=ta-ti;M.bustAdresse=Math.round(ta);M.bustDelta=Math.round(dd);
+    var kn=function(i){return ang(q(i,23),q(i,25),q(i,27))},dk=Math.max(0,Math.max(kn(im)-kn(0),(ang(q(im,24),q(im,26),q(im,28))-ang(q(0,24),q(0,26),q(0,28)))));M.genou=Math.round(dk);
+    (dd>12||dk>15)?pf("ext",Math.min(1,Math.max(dd/30,dk/40)),"Descente vers l’impact","Variation de l’angle du buste : "+M.bustDelta+"°, extension des genoux : "+M.genou+"°.","Indicateur approché ; l’impact est estimé et le bassin n’est mesuré qu’en 2D."):ok2.push("Inclinaison du buste conservée");
+    ta<12?pf("post",.5,"Adresse","Inclinaison du buste à l’adresse : environ "+M.bustAdresse+"°.","Seuil indicatif ; dépend du club et de la taille."):ok2.push("Posture d’adresse correcte");
+  }
+  def.sort(function(a,b){return b.sev-a.sev});
+  def.forEach(function(d){d.conf=conf});
+  return {date:new Date().toISOString(),view:view,conf:conf,rate:Math.round(rate*100),defs:def.slice(0,3),all:def.map(function(d){return d.id}),strengths:ok2,M:M,frames:F.length,level:lvl()};
+}
+
+/* ───── Caméra ───── */
+async function openCam(){
+  U.err=null;
+  try{U.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});}
+  catch(e){U.err="Caméra inaccessible : autorise la caméra dans les réglages du navigateur, ou importe une vidéo depuis ta galerie.";}
+  render();
+  if(U.stream){var v=$("lv");v.srcObject=U.stream;v.play()}
+}
+function stopCam(){if(U.stream){U.stream.getTracks().forEach(function(t){t.stop()});U.stream=null}}
+function startRec(){
+  var n=3;$("cd").textContent=n;
+  var iv=setInterval(function(){
+    n--;if(n>0){$("cd").textContent=n;return}
+    clearInterval(iv);$("cd").textContent="";
+    var ch=[],mt=window.MediaRecorder&&MediaRecorder.isTypeSupported("video/mp4")?"video/mp4":"video/webm";
+    U.rec=new MediaRecorder(U.stream,{mimeType:mt});
+    U.rec.ondataavailable=function(e){if(e.data.size)ch.push(e.data)};
+    U.rec.onstop=function(){setVideo(new Blob(ch,{type:mt}))};
+    U.rec.start();$("rb").textContent="■ Arrêter";$("rb").onclick=function(){U.rec.stop();stopCam()};
+  },1000);
+  $("rb").disabled=true;setTimeout(function(){$("rb").disabled=false},3100);
+}
+function setVideo(b){U.blob=b;if(U.url)URL.revokeObjectURL(U.url);U.url=URL.createObjectURL(b);U.step="film";render()}
+async function run(){
+  if(!U.consent)return alert("Coche le consentement pour lancer l’analyse.");
+  U.busy={p:0,msg:"Chargement du moteur d’analyse…"};render();
+  try{
+    var smp=await sample(U.url,function(p){U.busy={p:p,msg:"Analyse du mouvement… "+Math.round(p*100)+" %"};var b=$("pg");if(b){b.style.width=p*100+"%";$("pm").textContent=U.busy.msg}});
+    var r=analyze(smp,U.view);U.busy=null;
+    if(r.fail){U.err=r.fail;U.step="film";}
+    else{U.cur=r;S.hist.unshift(r);S.hist=S.hist.slice(0,50);sv();U.step="rep"}
+  }catch(e){U.busy=null;U.err="L’analyse a échoué : "+e.message+" (modèle hors ligne ? Vérifie ta connexion à la première utilisation.)"}
+  render();
+}
+
+/* ───── Vues ───── */
+function cfC(c){return '<span class="cf'+(c==="moyenne"?" m":c==="faible"?" f":"")+'">Confiance '+c+'</span>'}
+function exH(id){var x=X[id];return '<details><summary>'+x[0]+'</summary><div class="t"><b>Objectif :</b> '+x[1]+'<ol>'+x[2].split(/ ?\d\. /).filter(Boolean).map(function(s){return "<li>"+esc(s)+"</li>"}).join("")+'</ol><b>'+x[3]+' répétitions × '+x[4]+' séries</b>, récupération '+x[5]+'.<br>Matériel : '+x[6]+'<br>Sensation : '+x[7]+'<br>Erreur fréquente : '+x[8]+'<br><button class="chip" onclick="addPl(\''+id+'\')">'+(S.plan.indexOf(id)>=0?"✓ Dans mon plan":"+ Ajouter au plan")+'</button></div></details>'}
+function homeV(){
+  var h=S.hist,last=h[0],n=h.length;
+  var lv=["Débutant","Intermédiaire","Confirmé"][lvl()];
+  var o='<h1>Mon coach IA</h1><button class="btn" onclick="U.step=\'film\';U.blob=null;U.err=null;render()">▶ Analyser mon swing</button><button class="btn gh" onclick="U.step=\'hist\';render()">Voir mes analyses précédentes</button>';
+  o+='<div class="c"><div class="l">Progression</div><div style="font-size:20px;font-weight:800">'+lv+' · '+n+' analyse'+(n>1?"s":"")+'</div><div class="bar" style="margin:8px 0"><i style="width:'+Math.min(100,n*10)+'%"></i></div><div class="t">'+(n<2?"Fais au moins 2 analyses de même angle pour suivre l’évolution.":prog())+'</div></div>';
+  o+='<div class="c"><div class="l">Derniers défauts détectés</div>'+(last?(last.defs.length?last.defs.map(function(d){return "<div style='margin:4px 0'>• "+D[d.id].n+"</div>"}).join(""):"<div class='t'>Aucun défaut mesurable sur la dernière vidéo (selon les critères analysés).</div>"):"<div class='t'>Aucune analyse pour l’instant.</div>")+'</div>';
+  o+='<div class="c"><div class="l">Mon profil</div><div class="row"><div><div class="t">Handicap</div><input type="number" step="0.1" value="'+S.prof.hcp+'" onchange="S.prof.hcp=+this.value||0;sv();render()"></div><div><div class="t">Séances/sem.</div><input type="number" min="1" max="6" value="'+S.prof.freq+'" onchange="S.prof.freq=Math.min(6,Math.max(1,+this.value||3));sv()"></div><div><div class="t">Minutes</div><input type="number" min="15" max="90" value="'+S.prof.min+'" onchange="S.prof.min=Math.min(90,Math.max(15,+this.value||30));sv()"></div></div><label class="t" style="display:block;margin-top:8px"><input type="checkbox" style="width:auto" '+(S.prof.lefty?"checked":"")+' onchange="S.prof.lefty=this.checked;sv()"> Je suis gaucher</label></div>';
+  o+='<div class="t">Analyse réalisée sur ton téléphone : la vidéo n’est ni envoyée ni conservée.</div>';
+  return o;
+}
+function prog(){
+  var f=S.hist.filter(function(x){return x.view===S.hist[0].view});if(f.length<2)return "Pas encore deux analyses du même angle.";
+  var a=f[0],b=f[1],out=[],id;
+  Object.keys(D).forEach(function(k){var ia=a.all.indexOf(k)>=0,ib=b.all.indexOf(k)>=0;
+    if(ib&&!ia)out.push(f.length>=3&&f[2].all.indexOf(k)<0?D[k].n+" : corrigé sur 3 vidéos":D[k].n+" : amélioration à confirmer (1 vidéo)");
+    if(ia&&ib)out.push(D[k].n+" : persistant")});
+  return out.length?out.join(" · "):"Pas de changement notable.";
+}
+function filmV(){
+  if(U.busy)return '<h1>Analyse en cours</h1><div class="c"><div id="pm" class="t" style="margin-bottom:8px">'+U.busy.msg+'</div><div class="bar"><i id="pg" style="width:'+U.busy.p*100+'%"></i></div><div class="t" style="margin-top:8px">La première utilisation télécharge le modèle (quelques Mo). Aucun résultat n’est affiché avant la fin.</div></div>';
+  var o='<h1>Analyser mon swing</h1>'+(U.err?'<div class="c" style="border-color:var(--r)"><div class="t" style="color:var(--r)">'+esc(U.err)+'</div></div>':'');
+  o+='<div class="c"><div class="l">Angle de prise de vue</div><button class="chip'+(U.view==="face"?" on":"")+'" onclick="U.view=\'face\';render()">De face</button><button class="chip'+(U.view==="dtl"?" on":"")+'" onclick="U.view=\'dtl\';render()">De profil (derrière)</button><div class="t">'+(U.view==="face"?"Caméra face au joueur, assez loin pour voir pieds, corps, bras et club. Mesure : tête, bassin, rotation d’épaules, bras, tempo, finition.":"Caméra derrière le joueur dans l’axe de la ligne de jeu, hauteur des hanches. Mesure : posture, redressement, bras, tempo, finition.")+'</div></div>';
+  if(U.blob){
+    o+='<div class="vw"><video src="'+U.url+'" controls playsinline></video></div><label class="t" style="display:block;margin-bottom:10px"><input type="checkbox" style="width:auto" '+(U.consent?"checked":"")+' onchange="U.consent=this.checked"> Je consens à l’analyse de cette vidéo sur mon appareil. Elle n’est ni envoyée ni stockée.</label><button class="btn" onclick="run()">Lancer l’analyse</button><button class="btn gh" onclick="U.blob=null;U.err=null;render()">Recommencer</button>';
+  }else if(U.stream){
+    o+='<div class="vw"><video id="lv" muted playsinline></video><svg class="ov" viewBox="0 0 100 100" preserveAspectRatio="none"><rect x="25" y="5" width="50" height="90" rx="3" fill="none" stroke="#3ddc84" stroke-width=".6" stroke-dasharray="3"/><ellipse cx="50" cy="16" rx="6" ry="7" fill="none" stroke="#3ddc84" stroke-width=".6"/></svg><div id="cd"></div></div><div class="t" style="margin-bottom:10px">Place le joueur dans le cadre vert, pieds et club inclus. Un swing complet, de l’adresse à la finition.</div><button class="btn" id="rb" onclick="startRec()">● Démarrer (compte à rebours 3 s)</button><button class="btn gh" onclick="stopCam();render()">Annuler</button>';
+  }else{
+    o+='<button class="btn" onclick="openCam()">📷 Ouvrir la caméra</button><label class="btn gh" style="display:block;text-align:center">Importer depuis la galerie<input type="file" accept="video/*" hidden onchange="if(this.files[0])setVideo(this.files[0])"></label><div class="c"><div class="l">Conseils</div><div class="t">Lumière correcte, fond dégagé, téléphone fixe à l’horizontale ou à la verticale, vêtements non amples. Un seul swing par vidéo, d’au moins 2 secondes.</div></div>';
+  }
+  return o;
+}
+function repV(){
+  var r=U.cur||S.hist[0];if(!r)return '<h1>Rapport</h1><div class="t">Aucune analyse.</div>';
+  var o='<h1>Mon diagnostic</h1><div class="c"><span class="cf">'+(r.view==="face"?"Vue de face":"Vue de profil")+'</span> '+cfC(r.conf)+'<div class="t" style="margin-top:6px">Corps détecté sur '+r.rate+' % des images ('+r.frames+' images exploitées). Détection par vision par ordinateur ; les valeurs sont des estimations 2D, pas des mesures exactes.</div></div>';
+  if(r.conf==="faible")o+='<div class="c" style="border-color:var(--o)"><div class="t">Cette vidéo ne permet pas de conclure avec certitude. Les points ci-dessous sont à confirmer avec une meilleure vidéo.</div></div>';
+  if(!r.defs.length)o+='<div class="c"><div class="t">Aucun défaut mesurable avec les critères analysés. Cela ne garantit pas l’absence de défaut (trajectoire de balle et plan de club non analysés).</div></div>';
+  r.defs.forEach(function(d,i){var c=D[d.id];
+    o+='<div class="c"><div class="l">'+(i===0?"🎯 Objectif prioritaire":"Point à améliorer "+(i+1))+'</div><h2>'+c.n+'</h2><div class="t"><b>Moment :</b> '+d.mom+'<br><b>Observé :</b> '+esc(d.obs)+'<br><b>Hypothèse :</b> '+esc(d.hyp)+'<br><b>Conséquence possible :</b> '+c.cons+'</div>'+cfC(d.conf)+'<details><summary>Correction du coach</summary><div class="t"><b>Ce que tu fais :</b> '+c.now+'<br><b>À changer :</b> '+c.chg+'<br><b>Sensation :</b> '+c.feel+'<br><b>Vérifier :</b> '+c.chk+'</div></details>'+(i===0?c.ex.map(exH).join(""):"")+'</div>';});
+  if(r.defs.length>1)o+='<div class="t" style="margin-bottom:12px">Travaille uniquement l’objectif prioritaire avant d’aborder les autres.</div>';
+  o+='<div class="c"><div class="l">Points forts</div>'+(r.strengths.length?r.strengths.map(function(s){return "<div>✓ "+s+"</div>"}).join(""):"<div class='t'>Aucun point fort mesurable.</div>")+'</div>';
+  if(lvl()>0)o+='<div class="c"><div class="l">Données mesurées</div><div class="t">'+Object.keys(r.M).map(function(k){return k+" : "+r.M[k]}).join(" · ")+'</div></div>';
+  o+='<div class="c"><div class="l">Non analysable ici</div><div class="t">Slice, hook et plan de swing nécessitent la trajectoire de la balle et la position du club, non mesurées par cette détection du corps.</div></div><button class="btn" onclick="U.step=\'film\';U.blob=null;U.err=null;render()">Filmer à nouveau</button>';
+  return o;
+}
+function histV(){
+  var o='<h1>Historique</h1>';if(!S.hist.length)return o+'<div class="t">Aucune analyse.</div>';
+  S.hist.forEach(function(r,i){o+='<div class="c"><div class="row"><b>'+new Date(r.date).toLocaleDateString("fr-FR")+'</b><span style="text-align:right"><span class="cf">'+(r.view==="face"?"Face":"Profil")+'</span> '+cfC(r.conf)+'</span></div><div class="t" style="margin:6px 0">'+(r.defs.length?r.defs.map(function(d){return D[d.id].n}).join(" · "):"Aucun défaut mesuré")+'</div><button class="chip" onclick="U.cur=S.hist['+i+'];U.step=\'rep\';render()">Rapport</button><button class="chip'+(U.cmp.indexOf(i)>=0?" on":"")+'" onclick="cmp('+i+')">Comparer</button></div>'});
+  if(U.cmp.length===2){var a=S.hist[U.cmp[0]],b=S.hist[U.cmp[1]];
+    o+='<div class="c"><div class="l">Comparaison</div>'+(a.view!==b.view?'<div class="t">Angles différents : comparaison impossible.</div>':Object.keys(a.M).filter(function(k){return k in b.M}).map(function(k){return '<div class="t">'+k+' : '+b.M[k]+' → '+a.M[k]+'</div>'}).join("")+'<div class="t" style="margin-top:6px">Une seule vidéo meilleure ne prouve pas qu’un défaut est corrigé.</div>')+'</div>'}
+  return o;
+}
+function planV(){
+  var o='<h1>Mon plan</h1>',r=S.hist[0];
+  if(!r)return o+'<div class="t">Analyse d’abord un swing pour générer ton plan.</div>';
+  var ids=[];(r.defs[0]?D[r.defs[0].id].ex:[]).forEach(function(x){ids.push(x)});S.plan.forEach(function(x){if(ids.indexOf(x)<0)ids.push(x)});
+  if(!ids.length)return o+'<div class="t">Aucun défaut prioritaire : continue ta routine habituelle et refilme-toi dans quelques semaines.</div>';
+  var m=S.prof.min,u=function(p){return Math.max(2,Math.round(m*p/5)*5||5)};
+  o+='<div class="t" style="margin-bottom:10px">Objectif : '+(r.defs[0]?D[r.defs[0].id].n:"—")+' · '+S.prof.freq+' séance'+(S.prof.freq>1?"s":"")+' de '+m+' min / semaine</div>';
+  for(var i=0;i<S.prof.freq;i++){var ex=X[ids[i%ids.length]];
+    o+='<div class="c"><div class="l">Séance '+(i+1)+'</div><h2>'+ex[0]+'</h2><div class="t">• '+u(.17)+' min : échauffement et mobilité<br>• '+u(.17)+' min : répétitions à vide sans balle<br>• '+u(.33)+' min : exercice correctif — '+ex[3]+' répétitions × '+ex[4]+' séries<br>• '+u(.17)+' min : frappes contrôlées avec un club adapté<br>• '+u(.16)+' min : nouvelle vidéo et vérification des sensations</div></div>';}
+  o+='<div class="t">Le plan évolue après chaque nouvelle analyse.</div>';
+  return o;
+}
+function render(){
+  var m=$("m"),v={home:homeV,film:filmV,rep:repV,hist:histV,plan:planV};
+  m.innerHTML=(v[U.step]||homeV)();
+  document.querySelectorAll("#tb button").forEach(function(b){b.classList.toggle("on",b.dataset.s===U.step)});
+  if(U.step==="film"&&U.stream&&$("lv")){$("lv").srcObject=U.stream;$("lv").play()}
+}
+document.querySelectorAll("#tb button").forEach(function(b){b.onclick=function(){if(U.step==="film")stopCam();U.step=b.dataset.s;U.cur=U.step==="rep"?S.hist[0]:U.cur;render()}});
+Object.assign(window,{S:S,U:U,sv:sv,render:render,openCam:openCam,stopCam:stopCam,startRec:startRec,run:run,setVideo:setVideo,
+  addPl:function(id){var i=S.plan.indexOf(id);i<0?S.plan.push(id):S.plan.splice(i,1);sv();render()},
+  cmp:function(i){var j=U.cmp.indexOf(i);j>=0?U.cmp.splice(j,1):(U.cmp.push(i),U.cmp=U.cmp.slice(-2));render()}});
+function fail(e){U.busy=null;U.err="Erreur : "+((e&&(e.message||e.reason&&e.reason.message))||e&&e.reason||"inconnue");U.step="film";render()}
+window.addEventListener("unhandledrejection",fail);window.addEventListener("error",function(e){fail(e.error||e.message)});
+render();
+</script></body></html>
